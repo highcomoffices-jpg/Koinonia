@@ -5,6 +5,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Card } from '../ui/Card';
+import { ForgotPasswordModal } from './ForgotPasswordModal';
 
 interface LoginFormProps {
   onSwitchToRegister: () => void;
@@ -14,6 +15,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToRegister }) => {
   const { t } = useTranslation();
   const { login, isLoading } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
+  const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
   const [formData, setFormData] = useState({
     email: '',
     password: ''
@@ -150,6 +152,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToRegister }) => {
           <div className="text-right">
             <button
               type="button"
+              onClick={() => setIsForgotPasswordOpen(true)}
               className="text-sm text-primary-600 hover:text-primary-700 disabled:opacity-50"
               disabled={isLoadingTotal}
             >
@@ -182,6 +185,12 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToRegister }) => {
           </p>
         </div>
       </Card>
+
+      {/* Modal Mot de passe oublié */}
+      <ForgotPasswordModal
+        isOpen={isForgotPasswordOpen}
+        onClose={() => setIsForgotPasswordOpen(false)}
+      />
     </div>
   );
 };
