@@ -8,6 +8,7 @@ import { LoginForm } from './components/auth/LoginForm';
 import { RegisterPhase1 } from './components/auth/RegisterPhase1';
 import { RegisterPhase2 } from './components/auth/RegisterPhase2';
 import { ResetPasswordPage } from './components/auth/ResetPasswordPage';
+import { EmailConfirmationPage } from './components/auth/EmailConfirmationPage';
 import { HomePage } from './components/home/HomePage';
 import { ProfilePage } from './components/profile/ProfilePage';
 import { ParishesPage } from './components/parishes/ParishesPage';
@@ -217,11 +218,16 @@ function App() {
     );
   }
 
-  // Rendu basé sur la route actuelle (géré par le Router dans main.tsx)
+  // Rendu basé sur la route actuelle
   const renderPage = () => {
-    // Si l'utilisateur est sur la page de réinitialisation du mot de passe
+    // Page de réinitialisation du mot de passe
     if (window.location.pathname === '/reset-password') {
       return <ResetPasswordPage />;
+    }
+
+    // Page de confirmation d'email
+    if (window.location.pathname === '/confirm-email') {
+      return <EmailConfirmationPage />;
     }
 
     switch (activeTab) {
