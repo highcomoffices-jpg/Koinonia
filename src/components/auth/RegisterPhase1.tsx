@@ -400,12 +400,9 @@ export const RegisterPhase1: React.FC<RegisterPhase1Props> = ({
               <label htmlFor="acceptPolicies" className="text-sm text-gray-700 cursor-pointer">
                 J'accepte les{' '}
                 <a 
-                  href="#" 
-                  onClick={(e) => {
-                    e.preventDefault();
-                    // Ouvrir un modal ou une page avec les politiques
-                    alert('📋 Politiques de Koinonia\n\nConfidentialité : Vos données sont protégées et jamais revendues.\nUtilisation : Respect entre confessions, modération des contenus.');
-                  }}
+                  href="/policies"
+                  target="_blank"
+                  rel="noopener noreferrer"
                   className="text-primary-600 hover:underline font-medium"
                 >
                   Politiques de Koinonia
