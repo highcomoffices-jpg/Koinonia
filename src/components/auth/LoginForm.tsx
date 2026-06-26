@@ -158,7 +158,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToRegister }) => {
           {/* Mot de passe oublié - DÉSACTIVÉ TEMPORAIREMENT */}
           <div className="text-right">
             <span className="text-sm text-gray-400 cursor-not-allowed opacity-50">
-              Mot de passe oublié ? (indisponible)
+              Mot de passe oublié ?
             </span>
           </div>
 
