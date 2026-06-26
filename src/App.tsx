@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
 import { Header } from './components/layout/Header';
 import { Navigation } from './components/layout/Navigation';
 import { LoginForm } from './components/auth/LoginForm';
 import { RegisterPhase1 } from './components/auth/RegisterPhase1';
 import { RegisterPhase2 } from './components/auth/RegisterPhase2';
+import { ResetPasswordPage } from './components/auth/ResetPasswordPage';
 import { HomePage } from './components/home/HomePage';
 import { ProfilePage } from './components/profile/ProfilePage';
 import { ParishesPage } from './components/parishes/ParishesPage';
@@ -97,7 +98,9 @@ function App() {
   useEffect(() => {
     console.log('🔍 DEBUG App - isLoading:', isLoading);
     console.log('🔍 DEBUG App - user:', user ? user.email : 'null');
-  }, [isLoading, user]);
+    console.log('🔍 DEBUG App - isSuperAdmin:', isSuperAdmin);
+    console.log('🔍 DEBUG App - isShepherd:', isShepherd);
+  }, [isLoading, user, isSuperAdmin, isShepherd]);
 
   const [authView, setAuthView] = useState<AuthView>('login');
   const [activeTab, setActiveTab] = useState('home');
@@ -214,7 +217,13 @@ function App() {
     );
   }
 
-  const renderMainContent = () => {
+  // Rendu basé sur la route actuelle (géré par le Router dans main.tsx)
+  const renderPage = () => {
+    // Si l'utilisateur est sur la page de réinitialisation du mot de passe
+    if (window.location.pathname === '/reset-password') {
+      return <ResetPasswordPage />;
+    }
+
     switch (activeTab) {
       case 'home': return <HomePage />;
       case 'parishes': return <ParishesPage />;
@@ -255,7 +264,7 @@ function App() {
   const shepherdGrade = (user as any)?.shepherdGrade;
   const isAdmin = user?.role === 'admin';
 
-  const renderWithRoutes = () => {
+  const renderWithProtection = () => {
     if (activeTab === 'koinonia-admin') {
       return (
         <ProtectedRoute requireSuperAdmin isSuperAdmin={isSuperAdmin}>
@@ -272,7 +281,7 @@ function App() {
       );
     }
     
-    return renderMainContent();
+    return renderPage();
   };
 
   return (
@@ -334,7 +343,7 @@ function App() {
             </div>
           )}
           
-          {renderWithRoutes()}
+          {renderWithProtection()}
         </main>
       </div>
 
