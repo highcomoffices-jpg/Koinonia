@@ -32,6 +32,7 @@ export const RegisterPhase1: React.FC<RegisterPhase1Props> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [selectedContinent, setSelectedContinent] = useState('');
+  const [acceptPolicies, setAcceptPolicies] = useState(false);
   const [formData, setFormData] = useState<RegisterPhase1Data & { continentId?: string }>({
     firstName: '',
     lastName: '',
@@ -78,8 +79,6 @@ export const RegisterPhase1: React.FC<RegisterPhase1Props> = ({
       newErrors.password = 'Le mot de passe est requis';
     } else if (formData.password.length < 6) {
       newErrors.password = 'Le mot de passe doit contenir au moins 6 caractères';
-    } else if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(formData.password)) {
-      newErrors.password = 'Le mot de passe doit contenir au moins une majuscule, une minuscule et un chiffre';
     }
 
     if (formData.password !== formData.confirmPassword) {
@@ -88,6 +87,10 @@ export const RegisterPhase1: React.FC<RegisterPhase1Props> = ({
 
     if (!formData.countryId) {
       newErrors.countryId = 'Le pays est requis';
+    }
+
+    if (!acceptPolicies) {
+      newErrors.acceptPolicies = 'Vous devez accepter les politiques de Koinonia';
     }
 
     setErrors(newErrors);
@@ -113,11 +116,7 @@ export const RegisterPhase1: React.FC<RegisterPhase1Props> = ({
         countryId: formData.countryId,
       });
       
-      // Après une inscription réussie, afficher un message de confirmation
       setIsEmailSent(true);
-      
-      // Ne pas appeler onPhase1Complete immédiatement
-      // L'utilisateur doit d'abord confirmer son email
       
     } catch (error: any) {
       console.error('Registration error:', error);
@@ -165,7 +164,6 @@ export const RegisterPhase1: React.FC<RegisterPhase1Props> = ({
       }));
     }
     
-    // Clear error for this field when user starts typing
     if (errors[name]) {
       setErrors(prev => ({ ...prev, [name]: '' }));
     }
@@ -383,22 +381,43 @@ export const RegisterPhase1: React.FC<RegisterPhase1Props> = ({
             </button>
           </div>
 
-          <div className="text-sm text-gray-500 space-y-1">
-            <p>Le mot de passe doit contenir :</p>
-            <ul className="list-disc list-inside pl-2">
-              <li className={formData.password.length >= 6 ? 'text-green-600' : ''}>
-                Au moins 6 caractères
-              </li>
-              <li className={/(?=.*[a-z])/.test(formData.password) ? 'text-green-600' : ''}>
-                Au moins une minuscule
-              </li>
-              <li className={/(?=.*[A-Z])/.test(formData.password) ? 'text-green-600' : ''}>
-                Au moins une majuscule
-              </li>
-              <li className={/(?=.*\d)/.test(formData.password) ? 'text-green-600' : ''}>
-                Au moins un chiffre
-              </li>
-            </ul>
+          {/* Politiques - Case à cocher */}
+          <div className="space-y-2">
+            <div className="flex items-start space-x-2">
+              <input
+                type="checkbox"
+                id="acceptPolicies"
+                checked={acceptPolicies}
+                onChange={(e) => {
+                  setAcceptPolicies(e.target.checked);
+                  if (errors.acceptPolicies) {
+                    setErrors(prev => ({ ...prev, acceptPolicies: '' }));
+                  }
+                }}
+                className="mt-1 w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+                disabled={isLoading}
+              />
+              <label htmlFor="acceptPolicies" className="text-sm text-gray-700 cursor-pointer">
+                J'accepte les{' '}
+                <a 
+                  href="#" 
+                  onClick={(e) => {
+                    e.preventDefault();
+                    // Ouvrir un modal ou une page avec les politiques
+                    alert('📋 Politiques de Koinonia\n\nConfidentialité : Vos données sont protégées et jamais revendues.\nUtilisation : Respect entre confessions, modération des contenus.');
+                  }}
+                  className="text-primary-600 hover:underline font-medium"
+                >
+                  Politiques de Koinonia
+                </a>
+              </label>
+            </div>
+            {errors.acceptPolicies && (
+              <p className="text-sm text-red-600">{errors.acceptPolicies}</p>
+            )}
+            <p className="text-xs text-gray-400 pl-6">
+              En acceptant, vous reconnaissez avoir lu et compris nos politiques de confidentialité et d'utilisation.
+            </p>
           </div>
 
           <Button
@@ -407,7 +426,7 @@ export const RegisterPhase1: React.FC<RegisterPhase1Props> = ({
             size="lg"
             fullWidth
             loading={isLoading}
-            disabled={isLoading}
+            disabled={isLoading || !acceptPolicies}
           >
             {isLoading ? 'Inscription en cours...' : (t('register.phase1.continue') || 'Continuer')}
           </Button>
