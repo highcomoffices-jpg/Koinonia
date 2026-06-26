@@ -1,0 +1,391 @@
+import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { Users, Plus, X, Search, Loader2, UserPlus, Upload, Image } from 'lucide-react';
+import { useAuth } from '../../contexts/AuthContext';
+import { userSearchService, SearchUserResult } from '../../services/userSearchService';
+import { chatService } from '../../services/chatService';
+import { supabase } from '../../lib/supabase';
+import { Button } from '../ui/Button';
+import { Input } from '../ui/Input';
+import { Modal } from '../ui/Modal';
+
+interface CreateGroupModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onGroupCreated: (conversationId: string) => void;
+}
+
+const MAX_PARTICIPANTS = 50;
+const DEBOUNCE_MS = 300;
+
+export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, onGroupCreated }) => {
+  const { user } = useAuth();
+  const [step, setStep] = useState<'info' | 'participants'>('info');
+  const [groupName, setGroupName] = useState('');
+  const [groupImage, setGroupImage] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searchResults, setSearchResults] = useState<SearchUserResult[]>([]);
+  const [selectedUsers, setSelectedUsers] = useState<SearchUserResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Nettoyer l'aperçu de l'image au démontage
+  useEffect(() => {
+    return () => {
+      if (imagePreview) URL.revokeObjectURL(imagePreview);
+    };
+  }, [imagePreview]);
+
+  // Gestion de la recherche avec debounce
+  const handleSearch = useCallback(async () => {
+    if (!searchTerm.trim() || searchTerm.length < 2) return;
+    
+    setIsSearching(true);
+    try {
+      const results = await userSearchService.searchUsers(searchTerm, user?.id);
+      // Exclure les utilisateurs déjà sélectionnés ET l'utilisateur courant
+      const filtered = results.filter(r => 
+        r.id !== user?.id && !selectedUsers.some(u => u.id === r.id)
+      );
+      setSearchResults(filtered);
+    } catch (error) {
+      console.error('Error searching users:', error);
+    } finally {
+      setIsSearching(false);
+    }
+  }, [searchTerm, user?.id, selectedUsers]);
+
+  // Debounce sur le searchTerm
+  useEffect(() => {
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    
+    if (searchTerm.trim().length >= 2) {
+      debounceTimerRef.current = setTimeout(handleSearch, DEBOUNCE_MS);
+    } else {
+      setSearchResults([]);
+    }
+    
+    return () => {
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    };
+  }, [searchTerm, handleSearch]);
+
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    // Validation du type et taille (max 2MB)
+    if (!file.type.startsWith('image/')) {
+      alert('Veuillez sélectionner une image');
+      return;
+    }
+    
+    if (file.size > 2 * 1024 * 1024) {
+      alert('L\'image ne doit pas dépasser 2 Mo');
+      return;
+    }
+    
+    setGroupImage(file);
+    
+    // Créer un aperçu
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
+    setImagePreview(URL.createObjectURL(file));
+  };
+
+  const addUser = (newUser: SearchUserResult) => {
+    if (selectedUsers.length >= MAX_PARTICIPANTS) {
+      alert(`Maximum ${MAX_PARTICIPANTS} participants`);
+      return;
+    }
+    setSelectedUsers(prev => [...prev, newUser]);
+    setSearchResults(prev => prev.filter(u => u.id !== newUser.id));
+    setSearchTerm('');
+  };
+
+  const removeUser = (userId: string) => {
+    setSelectedUsers(prev => prev.filter(u => u.id !== userId));
+  };
+
+  const uploadGroupImage = async (conversationId: string): Promise<string | null> => {
+    if (!groupImage) return null;
+    
+    try {
+      const fileExt = groupImage.name.split('.').pop();
+      const fileName = `groups/${conversationId}/avatar.${fileExt}`;
+      
+      const { error: uploadError } = await supabase.storage
+        .from('chat-files')
+        .upload(fileName, groupImage, {
+          cacheControl: '3600',
+          upsert: true,
+        });
+      
+      if (uploadError) throw uploadError;
+      
+      const { data: { publicUrl } } = supabase.storage
+        .from('chat-files')
+        .getPublicUrl(fileName);
+      
+      return publicUrl;
+    } catch (error) {
+      console.error('Error uploading group image:', error);
+      return null;
+    }
+  };
+
+  const handleCreateGroup = async () => {
+    if (!groupName.trim()) {
+      alert('Veuillez entrer un nom pour le groupe');
+      return;
+    }
+    
+    if (selectedUsers.length === 0) {
+      alert('Veuillez ajouter au moins un participant');
+      return;
+    }
+    
+    setIsCreating(true);
+    setUploadProgress(0);
+    
+    try {
+      // Créer le groupe
+      const participantIds = selectedUsers.map(u => u.id);
+      const conversation = await chatService.createGroupConversation(groupName, participantIds);
+      
+      if (conversation) {
+        // Upload de l'image si présente
+        if (groupImage) {
+          const imageUrl = await uploadGroupImage(conversation.id);
+          if (imageUrl) {
+            // Mettre à jour la conversation avec l'URL de l'image
+            await supabase
+              .from('conversations')
+              .update({ avatar_url: imageUrl })
+              .eq('id', conversation.id);
+          }
+        }
+        
+        onGroupCreated(conversation.id);
+        resetForm();
+        onClose();
+      }
+    } catch (error) {
+      console.error('Error creating group:', error);
+      alert('Erreur lors de la création du groupe');
+    } finally {
+      setIsCreating(false);
+      setUploadProgress(0);
+    }
+  };
+
+  const resetForm = () => {
+    setStep('info');
+    setGroupName('');
+    setGroupImage(null);
+    if (imagePreview) {
+      URL.revokeObjectURL(imagePreview);
+      setImagePreview(null);
+    }
+    setSearchTerm('');
+    setSearchResults([]);
+    setSelectedUsers([]);
+    setUploadProgress(0);
+  };
+
+  const handleClose = () => {
+    resetForm();
+    onClose();
+  };
+
+  return (
+    <Modal isOpen={isOpen} onClose={handleClose} title="Créer un groupe" size="md">
+      {step === 'info' ? (
+        <div className="space-y-4">
+          <Input
+            label="Nom du groupe"
+            value={groupName}
+            onChange={(e) => setGroupName(e.target.value)}
+            placeholder="Ex: Jeunes Chrétiens de Cotonou"
+            maxLength={50}
+            required
+          />
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Photo du groupe (optionnelle)
+            </label>
+            <div className="flex items-center space-x-4">
+              {imagePreview ? (
+                <div className="relative">
+                  <img
+                    src={imagePreview}
+                    alt="Aperçu groupe"
+                    className="w-16 h-16 rounded-full object-cover"
+                  />
+                  <button
+                    onClick={() => {
+                      setGroupImage(null);
+                      if (imagePreview) URL.revokeObjectURL(imagePreview);
+                      setImagePreview(null);
+                    }}
+                    className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ) : (
+                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center">
+                  <Users className="w-8 h-8 text-gray-400" />
+                </div>
+              )}
+              <label className="cursor-pointer">
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageSelect}
+                  className="hidden"
+                />
+                <div className="flex items-center space-x-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">
+                  <Upload className="w-4 h-4" />
+                  <span className="text-sm">Choisir une image</span>
+                </div>
+              </label>
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              Format recommandé : JPG, PNG. Max 2 Mo
+            </p>
+          </div>
+
+          <div className="flex space-x-3 pt-4">
+            <Button variant="outline" fullWidth onClick={handleClose}>
+              Annuler
+            </Button>
+            <Button 
+              variant="primary" 
+              fullWidth 
+              onClick={() => setStep('participants')} 
+              disabled={!groupName.trim()}
+            >
+              Suivant
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="bg-gray-50 rounded-lg p-3">
+            <div className="flex items-center space-x-3">
+              {imagePreview ? (
+                <img src={imagePreview} alt="" className="w-10 h-10 rounded-full object-cover" />
+              ) : (
+                <div className="w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center">
+                  <Users className="w-5 h-5 text-gray-500" />
+                </div>
+              )}
+              <div className="flex-1">
+                <h3 className="font-medium text-gray-900">{groupName}</h3>
+                <p className="text-sm text-gray-500">
+                  {selectedUsers.length} participant{selectedUsers.length !== 1 ? 's' : ''} sur {MAX_PARTICIPANTS} max
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex space-x-2">
+            <Input
+              placeholder="Rechercher des utilisateurs..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              icon={Search}
+              className="flex-1"
+            />
+            <Button 
+              onClick={handleSearch} 
+              disabled={isSearching || searchTerm.length < 2}
+              variant="outline"
+            >
+              {isSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Rechercher'}
+            </Button>
+          </div>
+
+          {searchResults.length > 0 && (
+            <div className="border rounded-lg max-h-40 overflow-y-auto divide-y divide-gray-100">
+              {searchResults.map((result) => (
+                <button
+                  key={result.id}
+                  onClick={() => addUser(result)}
+                  className="w-full flex items-center justify-between p-3 hover:bg-gray-50 transition-colors text-left"
+                >
+                  <div className="flex items-center space-x-3">
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary-400 to-spiritual-400 flex items-center justify-center text-white text-xs font-semibold">
+                      {result.first_name[0]}{result.last_name[0]}
+                    </div>
+                    <span className="text-sm">
+                      {result.first_name} {result.last_name}
+                    </span>
+                  </div>
+                  <UserPlus className="w-4 h-4 text-green-500" />
+                </button>
+              ))}
+            </div>
+          )}
+
+          {selectedUsers.length > 0 && (
+            <div>
+              <h3 className="text-sm font-medium text-gray-700 mb-2">
+                Participants ({selectedUsers.length}/{MAX_PARTICIPANTS})
+              </h3>
+              <div className="space-y-2 max-h-48 overflow-y-auto">
+                {selectedUsers.map((selected) => (
+                  <div
+                    key={selected.id}
+                    className="flex items-center justify-between p-2 bg-gray-50 rounded-lg"
+                  >
+                    <div className="flex items-center space-x-2">
+                      <div className="w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center text-xs font-semibold">
+                        {selected.first_name[0]}{selected.last_name[0]}
+                      </div>
+                      <span className="text-sm">
+                        {selected.first_name} {selected.last_name}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => removeUser(selected.id)}
+                      className="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-50 transition-colors"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {selectedUsers.length === 0 && searchResults.length === 0 && !isSearching && (
+            <div className="text-center py-8">
+              <Users className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+              <p className="text-gray-500">Recherchez des utilisateurs pour les ajouter au groupe</p>
+            </div>
+          )}
+
+          <div className="flex space-x-3 pt-4">
+            <Button variant="outline" fullWidth onClick={() => setStep('info')}>
+              Retour
+            </Button>
+            <Button
+              variant="spiritual"
+              fullWidth
+              onClick={handleCreateGroup}
+              loading={isCreating}
+              disabled={selectedUsers.length === 0}
+            >
+              {isCreating ? 'Création...' : 'Créer le groupe'}
+            </Button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+};

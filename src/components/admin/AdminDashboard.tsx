@@ -1,0 +1,157 @@
+import React, { useState } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
+import { Shield, Users, Building2, Settings, Flag, Ban, AlertTriangle, DollarSign } from 'lucide-react';
+import { Card } from '../ui/Card';
+import { Button } from '../ui/Button';
+import { SettingsPanel } from './SettingsPanel';
+import { ValidateCreatorModal } from './ValidateCreatorModal';
+import { ValidateParishModal } from './ValidateParishModal';
+import { ForbiddenWordsManager } from './ForbiddenWordsManager';
+import { ReportsPanel } from '../moderation/ReportsPanel';
+import { KoinoniaFinancePanel } from './KoinoniaFinancePanel';
+
+type TabType = 'creators' | 'parishes' | 'forbidden-words' | 'reports' | 'settings' | 'finance';
+
+export const AdminDashboard: React.FC = () => {
+  const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState<TabType>('creators');
+  const [isCreatorModalOpen, setIsCreatorModalOpen] = useState(false);
+  const [isParishModalOpen, setIsParishModalOpen] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const isAdmin = user?.role === 'admin' || user?.shepherdGrade === 'elder';
+
+  const tabs = [
+    { id: 'creators' as TabType, label: 'Vignerons', icon: Users, description: 'Valider les demandes de certification' },
+    { id: 'parishes' as TabType, label: 'Paroisses', icon: Building2, description: 'Valider les nouvelles paroisses' },
+    { id: 'forbidden-words' as TabType, label: 'Mots interdits', icon: Ban, description: 'Gérer les mots proscrits' },
+    { id: 'reports' as TabType, label: 'Signalements', icon: Flag, description: 'Gérer les signalements utilisateurs' },
+    { id: 'finance' as TabType, label: 'Finances', icon: DollarSign, description: 'Tableau de bord financier global', badge: 'GLOBAL' },
+    { id: 'settings' as TabType, label: 'Configuration', icon: Settings, description: 'Paramètres généraux' },
+  ];
+
+  const handleRefresh = () => {
+    setRefreshKey(prev => prev + 1);
+  };
+
+  if (!isAdmin) {
+    return (
+      <div className="max-w-4xl mx-auto p-4">
+        <Card className="text-center py-12">
+          <Shield className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">Accès restreint</h2>
+          <p className="text-gray-600">
+            Vous n'avez pas les droits nécessaires pour accéder à cette page.
+          </p>
+        </Card>
+      </div>
+    );
+  }
+
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case 'creators':
+        return (
+          <div>
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-semibold text-gray-900">Validation des vignerons</h2>
+              <Button
+                variant="primary"
+                onClick={() => setIsCreatorModalOpen(true)}
+              >
+                Voir les demandes
+              </Button>
+            </div>
+            <Card className="p-6 text-center text-gray-500">
+              <Users className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+              <p>Cliquez sur "Voir les demandes" pour gérer les certifications de vignerons.</p>
+            </Card>
+            <ValidateCreatorModal
+              isOpen={isCreatorModalOpen}
+              onClose={() => setIsCreatorModalOpen(false)}
+              onSuccess={handleRefresh}
+            />
+          </div>
+        );
+      
+      case 'parishes':
+        return (
+          <div>
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-semibold text-gray-900">Validation des paroisses</h2>
+              <Button
+                variant="primary"
+                onClick={() => setIsParishModalOpen(true)}
+              >
+                Voir les demandes
+              </Button>
+            </div>
+            <Card className="p-6 text-center text-gray-500">
+              <Building2 className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+              <p>Cliquez sur "Voir les demandes" pour valider les nouvelles paroisses.</p>
+            </Card>
+            <ValidateParishModal
+              isOpen={isParishModalOpen}
+              onClose={() => setIsParishModalOpen(false)}
+              onSuccess={handleRefresh}
+            />
+          </div>
+        );
+      
+      case 'forbidden-words':
+        return <ForbiddenWordsManager />;
+      
+      case 'reports':
+        return <ReportsPanel />;
+      
+      case 'finance':
+        return <KoinoniaFinancePanel />;
+      
+      case 'settings':
+        return <SettingsPanel />;
+      
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div className="max-w-6xl mx-auto p-4">
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-gray-900">Administration Koinonia</h1>
+        <p className="text-gray-600">Gérez les paramètres et les validations de la plateforme</p>
+      </div>
+
+      {/* Onglets */}
+      <div className="flex flex-wrap gap-2 mb-6">
+        {tabs.map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.id;
+          
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors ${
+                isActive
+                  ? 'bg-gradient-to-r from-spiritual-500 to-primary-500 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              <span>{tab.label}</span>
+              {tab.badge && (
+                <span className="ml-1 px-1.5 py-0.5 text-xs bg-white/20 rounded-full">
+                  {tab.badge}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Contenu de l'onglet actif */}
+      {renderTabContent()}
+    </div>
+  );
+};

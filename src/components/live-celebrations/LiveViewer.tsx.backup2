@@ -1,0 +1,572 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { Heart, Share2, MessageCircle, Gift, X, Minus, Maximize, MinusCircle, TrendingUp, Play, Pause, Volume2, VolumeX, RefreshCw, MoreHorizontal, Loader2 } from 'lucide-react';
+import { useAuth } from '../../contexts/AuthContext';
+import { liveCelebrationService, LiveCelebration } from '../../services/liveCelebrationService';
+import { supabase } from '../../lib/supabase';
+import { ReactionPicker } from '../ui/ReactionPicker';
+import { LiveChat } from './LiveChat';
+import { Button } from '../ui/Button';
+
+interface LiveViewerProps {
+  live: LiveCelebration;
+  onClose: () => void;
+  onShare?: () => void;
+}
+
+// Vidéo de démonstration locale (fallback)
+const DEMO_VIDEO_URL = '/videos/demo.mp4';
+
+// Vérifie si l'URL est une vidéo directe MP4
+const isDirectVideoUrl = (url: string): boolean => {
+  if (!url) return false;
+  return url.endsWith('.mp4') || url.includes('.mp4?') || url.startsWith('/videos/');
+};
+
+export const LiveViewer: React.FC<LiveViewerProps> = ({ live, onClose, onShare }) => {
+  const { user } = useAuth();
+  const [showReactions, setShowReactions] = useState(false);
+  const [showChat, setShowChat] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isMinimized, setIsMinimized] = useState(false);
+  const [showActionsMenu, setShowActionsMenu] = useState(false);
+  const [totalOfferings, setTotalOfferings] = useState(live.total_offerings || 0);
+  const [recentReactions, setRecentReactions] = useState<{ id: string; reaction: string; user_name: string }[]>([]);
+  const [isDonationModalOpen, setIsDonationModalOpen] = useState(false);
+  const [donationAmount, setDonationAmount] = useState(1000);
+  const [donationMethod, setDonationMethod] = useState('mobile_money');
+  const [isDonating, setIsDonating] = useState(false);
+  const [participantsCount, setParticipantsCount] = useState(live.participants_count || 0);
+  const [viewerCount, setViewerCount] = useState(live.viewer_count || 0);
+  
+  // État vidéo
+  const [isPlaying, setIsPlaying] = useState(true);
+  const [isMuted, setIsMuted] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [videoError, setVideoError] = useState(false);
+  const [isLoadingVideo, setIsLoadingVideo] = useState(true);
+  const [loadingProgress, setLoadingProgress] = useState(0);
+  const [showReplay, setShowReplay] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const hasIncrementedView = useRef(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Fermer le menu actions
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setShowActionsMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Déterminer l'URL de la vidéo (uniquement MP4 direct)
+  const streamUrl = live.stream_url?.trim() || '';
+  const isDirectVideo = isDirectVideoUrl(streamUrl);
+  const videoUrl = isDirectVideo ? streamUrl : DEMO_VIDEO_URL;
+
+  // Incrémenter compteur vues
+  useEffect(() => {
+    const incrementView = async () => {
+      if (!hasIncrementedView.current && user) {
+        hasIncrementedView.current = true;
+        await liveCelebrationService.incrementViewCount(live.id);
+        setViewerCount(prev => prev + 1);
+      }
+    };
+    incrementView();
+  }, [live.id, user]);
+
+  // Subscription réactions
+  useEffect(() => {
+    const channel = supabase
+      .channel(`live-${live.id}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'live_reactions',
+        filter: `live_id=eq.${live.id}`,
+      }, async (payload) => {
+        const { reaction, user_id } = payload.new;
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('first_name, last_name')
+          .eq('id', user_id)
+          .single();
+        const userName = profile ? `${profile.first_name} ${profile.last_name}` : 'Quelqu\'un';
+        
+        setRecentReactions(prev => [...prev, { id: Date.now().toString(), reaction, user_name: userName }]);
+        setTimeout(() => setRecentReactions(prev => prev.slice(1)), 5000);
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [live.id]);
+
+  // Subscription offrandes
+  useEffect(() => {
+    const channel = supabase
+      .channel(`offerings-${live.id}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'live_offerings',
+        filter: `live_id=eq.${live.id}`,
+      }, (payload) => {
+        if (payload.new.status === 'completed') {
+          setTotalOfferings(prev => prev + payload.new.amount);
+        }
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [live.id]);
+
+  // Subscription participants
+  useEffect(() => {
+    const channel = supabase
+      .channel(`live-viewers-${live.id}`)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'live_celebrations',
+        filter: `id=eq.${live.id}`,
+      }, (payload) => {
+        if (payload.new.participants_count !== undefined) setParticipantsCount(payload.new.participants_count);
+        if (payload.new.viewer_count !== undefined) setViewerCount(payload.new.viewer_count);
+        if (payload.new.total_offerings !== undefined) setTotalOfferings(payload.new.total_offerings);
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [live.id]);
+
+  // Gestion vidéo
+  const handleVideoError = () => { 
+    setVideoError(true); 
+    setIsLoadingVideo(false);
+  };
+  
+  const handleVideoEnded = () => { setShowReplay(true); setIsPlaying(false); };
+  
+  const handleReplay = () => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = 0;
+      videoRef.current.play();
+      setShowReplay(false);
+      setIsPlaying(true);
+    }
+  };
+
+  const handleLoadStart = () => {
+    setIsLoadingVideo(true);
+    setLoadingProgress(0);
+    setVideoError(false);
+  };
+
+  const handleProgress = () => {
+    if (videoRef.current && videoRef.current.buffered.length > 0) {
+      const buffered = videoRef.current.buffered.end(0);
+      const duration = videoRef.current.duration;
+      if (duration > 0) {
+        setLoadingProgress((buffered / duration) * 100);
+      }
+    }
+  };
+
+  const handleCanPlay = () => {
+    setIsLoadingVideo(false);
+    setLoadingProgress(100);
+  };
+
+  useEffect(() => {
+    if (videoRef.current && !videoError) {
+      videoRef.current.load();
+      if (isPlaying) {
+        videoRef.current.play().catch(() => setIsPlaying(false));
+      }
+    }
+  }, [videoUrl]);
+
+  const handlePlayPause = () => {
+    if (videoRef.current) {
+      if (isPlaying) videoRef.current.pause();
+      else { videoRef.current.play(); setShowReplay(false); }
+      setIsPlaying(!isPlaying);
+    }
+  };
+
+  const handleMute = () => {
+    if (videoRef.current) {
+      videoRef.current.muted = !isMuted;
+      setIsMuted(!isMuted);
+    }
+  };
+
+  const handleTimeUpdate = () => {
+    if (videoRef.current?.duration && !isNaN(videoRef.current.duration)) {
+      setProgress((videoRef.current.currentTime / videoRef.current.duration) * 100);
+    }
+  };
+
+  const handleLoadedMetadata = () => {
+    if (videoRef.current?.duration && !isNaN(videoRef.current.duration)) {
+      setDuration(videoRef.current.duration);
+      setVideoError(false);
+    }
+  };
+
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (videoRef.current && duration && !isNaN(duration)) {
+      videoRef.current.currentTime = (parseFloat(e.target.value) / 100) * duration;
+      setProgress(parseFloat(e.target.value));
+    }
+  };
+
+  const formatTime = (seconds: number): string => {
+    if (isNaN(seconds) || !isFinite(seconds)) return '0:00';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // ✅ Version simple qui fonctionnait avant
+  const handleReaction = async (reaction: string) => {
+    if (!user) return;
+    await supabase.from('live_reactions').insert({
+      live_id: live.id,
+      user_id: user.id,
+      reaction,
+    });
+  };
+
+  const handleDonation = async () => {
+    if (!user) { alert('Connectez-vous pour faire une offrande'); return; }
+    setIsDonating(true);
+    try {
+      const { error } = await supabase.from('live_offerings').insert({
+        live_id: live.id, 
+        donor_id: user.id, 
+        amount: donationAmount,
+        currency: 'XOF', 
+        payment_method: donationMethod, 
+        status: 'completed',
+      });
+      if (error) throw error;
+      setIsDonationModalOpen(false);
+      setDonationAmount(1000);
+      setTotalOfferings(prev => prev + donationAmount);
+    } catch (error) { 
+      alert('Erreur lors de l\'offrande'); 
+    } finally { 
+      setIsDonating(false); 
+    }
+  };
+
+  const formatNumber = (num: number): string => {
+    if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
+    if (num >= 1000) return `${(num / 1000).toFixed(0)}k`;
+    return num.toString();
+  };
+
+  // Composant titre défilant
+  const MarqueeTitle = () => {
+    const title = live.title;
+    const containerRef = useRef<HTMLDivElement>(null);
+    const [needsMarquee, setNeedsMarquee] = useState(false);
+
+    useEffect(() => {
+      if (containerRef.current) {
+        setNeedsMarquee(containerRef.current.scrollWidth > containerRef.current.clientWidth);
+      }
+    }, [title]);
+
+    if (needsMarquee) {
+      return (
+        <div className="overflow-hidden whitespace-nowrap" ref={containerRef}>
+          <div className="animate-marquee inline-block">
+            {title} &nbsp;•&nbsp; {title} &nbsp;•&nbsp; {title}
+          </div>
+        </div>
+      );
+    }
+    return <div className="truncate" ref={containerRef}>{title}</div>;
+  };
+
+  // Rendu vidéo
+  const renderVideoPlayer = () => {
+    return (
+      <>
+        {isLoadingVideo && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black z-10">
+            <Loader2 className="w-12 h-12 text-white animate-spin mb-3" />
+            <div className="w-48 h-1 bg-gray-700 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-red-500 transition-all duration-300"
+                style={{ width: `${loadingProgress}%` }}
+              />
+            </div>
+            <p className="text-gray-400 text-xs mt-2">Chargement... {Math.round(loadingProgress)}%</p>
+          </div>
+        )}
+        
+        <video
+          ref={videoRef}
+          src={videoUrl}
+          className="w-full h-full object-contain"
+          autoPlay
+          onTimeUpdate={handleTimeUpdate}
+          onLoadedMetadata={handleLoadedMetadata}
+          onError={handleVideoError}
+          onEnded={handleVideoEnded}
+          onLoadStart={handleLoadStart}
+          onProgress={handleProgress}
+          onCanPlay={handleCanPlay}
+        />
+        
+        {/* Logo K */}
+        <div className="absolute bottom-3 right-3 z-10 bg-black/60 backdrop-blur-sm rounded-full w-8 h-8 flex items-center justify-center">
+          <span className="text-white font-bold text-sm">K</span>
+        </div>
+        
+        {showReplay && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/70 z-10">
+            <button onClick={handleReplay} className="flex flex-col items-center gap-2 px-6 py-3 bg-red-600 hover:bg-red-700 rounded-full">
+              <RefreshCw className="w-8 h-8 text-white" />
+              <span className="text-white text-sm">Revoir</span>
+            </button>
+          </div>
+        )}
+        
+        {!videoError && !isLoadingVideo && (
+          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3">
+            <input
+              type="range"
+              min="0"
+              max="100"
+              value={progress}
+              onChange={handleSeek}
+              className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer accent-red-500"
+            />
+            <div className="flex items-center justify-between mt-2">
+              <div className="flex items-center gap-3">
+                <button onClick={handlePlayPause} className="text-white">
+                  {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
+                </button>
+                <button onClick={handleMute} className="text-white">
+                  {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+                </button>
+                <span className="text-xs text-white">
+                  {formatTime(videoRef.current?.currentTime || 0)} / {formatTime(duration)}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {videoError && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-800 z-10">
+            <p className="text-white mb-2">⚠️ Vidéo non disponible</p>
+            <p className="text-gray-400 text-sm text-center px-4">
+              La vidéo n'a pas pu être chargée.<br/>
+              Vérifiez que le fichier existe et est au format MP4.
+            </p>
+          </div>
+        )}
+      </>
+    );
+  };
+
+  // Mode réduit
+  if (isMinimized) {
+    return (
+      <div className="fixed bottom-4 right-4 z-50 w-80 bg-black rounded-xl overflow-hidden shadow-2xl cursor-pointer" onClick={() => setIsMinimized(false)}>
+        <div className="relative aspect-video bg-black">
+          <video src={videoUrl} className="w-full h-full object-cover" autoPlay muted loop />
+          <div className="absolute top-2 left-2 px-2 py-1 bg-red-600 text-white text-xs rounded-full animate-pulse">● LIVE</div>
+          <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/50 text-white text-xs rounded-full">👁️ {formatNumber(viewerCount)}</div>
+          <button onClick={(e) => { e.stopPropagation(); onClose(); }} className="absolute top-2 right-2 p-1 bg-black/50 rounded-full text-white hover:bg-black/70">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="p-2 text-white text-sm truncate">{live.title}</div>
+      </div>
+    );
+  }
+
+  // Mode normal
+  return (
+    <div className={`fixed inset-0 bg-black z-50 flex flex-col ${isFullscreen ? '' : 'p-4'}`}>
+      
+      {/* En-tête */}
+      <div className="flex-shrink-0 flex items-center justify-between p-3 bg-gradient-to-b from-black/80 to-transparent">
+        <div className="flex items-center gap-2">
+          <button onClick={onClose} className="text-white hover:text-gray-300 p-1">
+            <X className="w-5 h-5" />
+          </button>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="px-1.5 py-0.5 text-xs font-bold rounded-full bg-red-600 text-white animate-pulse">● LIVE</span>
+              <span className="text-xs text-gray-300">👁️ {formatNumber(viewerCount)}</span>
+              <span className="text-xs text-gray-300">👥 {participantsCount || 0}</span>
+              <span className="flex items-center gap-1 px-1.5 py-0.5 bg-green-900/50 rounded-full">
+                <Gift className="w-3 h-3 text-green-400" />
+                <span className="text-xs text-green-400 font-semibold">{formatNumber(totalOfferings)} FCFA</span>
+              </span>
+              <button 
+                onClick={() => setIsDonationModalOpen(true)} 
+                className="flex items-center gap-1 px-2 py-0.5 bg-yellow-600 hover:bg-yellow-700 rounded-full text-xs font-medium text-white transition-colors"
+              >
+                <Gift className="w-3 h-3" />
+                Offrir
+              </button>
+            </div>
+            <h2 className="text-sm font-semibold text-white line-clamp-1 hidden lg:block">{live.title}</h2>
+          </div>
+        </div>
+        
+        <div className="relative" ref={menuRef}>
+          <button onClick={() => setShowActionsMenu(!showActionsMenu)} className="p-2 text-white hover:bg-white/20 rounded-lg">
+            <MoreHorizontal className="w-5 h-5" />
+          </button>
+          
+          {showActionsMenu && (
+            <div className="absolute right-0 top-full mt-1 bg-gray-800 rounded-lg shadow-xl border border-gray-700 py-1 z-50 min-w-[140px]">
+              <button onClick={() => { setIsMinimized(true); setShowActionsMenu(false); }} className="w-full text-left px-4 py-2 text-sm text-white hover:bg-white/10 flex items-center gap-2">
+                <MinusCircle className="w-4 h-4" /> Réduire
+              </button>
+              <button onClick={() => { setIsFullscreen(!isFullscreen); setShowActionsMenu(false); }} className="w-full text-left px-4 py-2 text-sm text-white hover:bg-white/10 flex items-center gap-2">
+                {isFullscreen ? <Minus className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+                {isFullscreen ? 'Quitter plein écran' : 'Plein écran'}
+              </button>
+              <button onClick={() => { onShare?.(); setShowActionsMenu(false); }} className="w-full text-left px-4 py-2 text-sm text-white hover:bg-white/10 flex items-center gap-2">
+                <Share2 className="w-4 h-4" /> Partager
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Contenu principal */}
+      <div className="flex-1 overflow-y-auto min-h-0">
+        <div className="flex flex-col lg:flex-row gap-3 p-3">
+          
+          {/* Lecteur vidéo */}
+          <div className="flex-1 flex flex-col">
+            <div className="relative aspect-video bg-black rounded-xl overflow-hidden">
+              {renderVideoPlayer()}
+            </div>
+
+            {live.description && (
+              <div className="mt-2 p-2 bg-white/5 rounded-lg">
+                <p className="text-xs text-gray-300 line-clamp-2">{live.description}</p>
+              </div>
+            )}
+
+            <div className="flex items-center gap-3 mt-3 flex-wrap">
+              <div className="relative">
+                <button onClick={() => setShowReactions(!showReactions)} className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-full text-sm">
+                  <Heart className="w-4 h-4 text-red-500" />
+                  <span className="text-white">Réagir</span>
+                </button>
+                {showReactions && (
+                  <div className="absolute top-full left-0 mt-2 z-50">
+                    <ReactionPicker onSelect={handleReaction} onClose={() => setShowReactions(false)} />
+                  </div>
+                )}
+              </div>
+
+              <button onClick={() => setShowChat(!showChat)} className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-full text-sm">
+                <MessageCircle className="w-4 h-4" />
+                <span className="text-white">Chat</span>
+              </button>
+            </div>
+          </div>
+
+          {showChat && (
+            <div className="w-full lg:w-80 flex-shrink-0 h-[400px] lg:h-[500px]">
+              <LiveChat liveId={live.id} />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Bandeau titre défilant */}
+      <div className="flex-shrink-0 bg-gradient-to-t from-black/90 to-transparent py-2 px-4">
+        <div className="text-white text-sm font-medium">
+          <MarqueeTitle />
+        </div>
+      </div>
+
+      {/* Réactions flottantes */}
+      <div className="fixed bottom-24 right-8 flex flex-col gap-2 z-50">
+        {recentReactions.map((reaction) => (
+          <div key={reaction.id} className="animate-float bg-black/50 backdrop-blur rounded-full px-2 py-1 text-base flex items-center gap-1">
+            <span>{reaction.reaction}</span>
+            <span className="text-xs text-white/70">{reaction.user_name}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Modal don avec mode de paiement */}
+      {isDonationModalOpen && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-900 rounded-2xl max-w-md w-full p-5">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="text-lg font-bold text-white">Offrande</h3>
+              <button onClick={() => setIsDonationModalOpen(false)} className="text-gray-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="text-gray-400 text-sm mb-3">Soutenez ce live</p>
+            <div className="grid grid-cols-4 gap-2 mb-3">
+              {[500, 1000, 2000, 5000].map(amount => (
+                <button key={amount} onClick={() => setDonationAmount(amount)} className={`py-2 rounded-lg font-medium text-sm ${donationAmount === amount ? 'bg-yellow-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}>
+                  {amount.toLocaleString()} F
+                </button>
+              ))}
+            </div>
+            <div className="mb-3">
+              <input 
+                type="number" 
+                value={donationAmount} 
+                onChange={(e) => setDonationAmount(parseInt(e.target.value) || 0)} 
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm" 
+                placeholder="Autre montant" 
+              />
+            </div>
+            <div className="mb-3">
+              <label className="block text-xs text-gray-400 mb-1">Mode de paiement</label>
+              <select 
+                value={donationMethod}
+                onChange={(e) => setDonationMethod(e.target.value)}
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm"
+              >
+                <option value="mobile_money">📱 Mobile Money (Orange/MTN)</option>
+                <option value="wave">🌊 Wave</option>
+                <option value="card">💳 Carte bancaire</option>
+                <option value="stripe">⚡ Stripe</option>
+              </select>
+            </div>
+            <Button onClick={handleDonation} loading={isDonating} fullWidth variant="spiritual" size="sm">
+              Offrir {donationAmount.toLocaleString()} FCFA
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        @keyframes marquee {
+          0% { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
+        }
+        .animate-marquee {
+          animation: marquee 15s linear infinite;
+          display: inline-block;
+        }
+      `}</style>
+    </div>
+  );
+};

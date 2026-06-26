@@ -1,0 +1,336 @@
+import React, { useState, useEffect } from 'react';
+import { Search, X, Loader2, MessageCircle, UserPlus, Users, Clock } from 'lucide-react';
+import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../contexts/AuthContext';
+import { userSearchService, SearchUserResult } from '../../services/userSearchService';
+import { chatService } from '../../services/chatService';
+import { Button } from '../ui/Button';
+import { Input } from '../ui/Input';
+import { Card } from '../ui/Card';
+import { Modal } from '../ui/Modal';
+
+interface NewConversationModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onConversationCreated: (conversationId: string, otherUser: SearchUserResult) => void;
+}
+
+export const NewConversationModal: React.FC<NewConversationModalProps> = ({
+  isOpen,
+  onClose,
+  onConversationCreated,
+}) => {
+  const { user } = useAuth();
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searchResults, setSearchResults] = useState<SearchUserResult[]>([]);
+  const [recentUsers, setRecentUsers] = useState<SearchUserResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<SearchUserResult | null>(null);
+  const [firstMessage, setFirstMessage] = useState('');
+
+  useEffect(() => {
+    if (isOpen && user) loadRecentUsers();
+  }, [isOpen, user]);
+
+  const loadRecentUsers = async () => {
+    if (!user) return;
+    const users = await userSearchService.getRecentUsers(user.id);
+    setRecentUsers(users);
+  };
+
+  const handleSearch = async () => {
+    if (!searchTerm.trim() || searchTerm.length < 2) {
+      // Message d'info si moins de 2 caractères
+      return;
+    }
+    setIsSearching(true);
+    try {
+      const results = await userSearchService.searchUsers(searchTerm, user?.id);
+      setSearchResults(results);
+    } catch (error) {
+      console.error('Error searching users:', error);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleUserSelect = (selected: SearchUserResult) => setSelectedUser(selected);
+
+  const handleCreateConversation = async () => {
+    if (!selectedUser || !user) return;
+    setIsCreating(true);
+    try {
+      const conversation = await chatService.createDirectConversation(selectedUser.id);
+      if (conversation) {
+        if (firstMessage.trim()) {
+          await chatService.sendMessage(conversation.id, firstMessage.trim());
+        }
+        onConversationCreated(conversation.id, selectedUser);
+        resetForm();
+        onClose();
+      }
+    } catch (error) {
+      console.error('Error creating conversation:', error);
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  const resetForm = () => {
+    setSearchTerm('');
+    setSearchResults([]);
+    setSelectedUser(null);
+    setFirstMessage('');
+  };
+
+  const handleClose = () => {
+    resetForm();
+    onClose();
+  };
+
+  return (
+    <Modal isOpen={isOpen} onClose={handleClose} title="Nouvelle conversation" size="md">
+      {!selectedUser ? (
+        <div className="space-y-6 p-1">
+          {/* Section recherche */}
+          <div className="space-y-3">
+            <div className="flex flex-col sm:flex-row sm:space-x-2 space-y-2 sm:space-y-0">
+              <div className="flex-1">
+                <Input
+                  placeholder="Rechercher par nom, prénom ou email..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+                  icon={Search}
+                  className="w-full"
+                />
+                {searchTerm.length > 0 && searchTerm.length < 2 && (
+                  <p className="text-xs text-amber-600 mt-1 ml-1">
+                    Minimum 2 caractères pour la recherche
+                  </p>
+                )}
+              </div>
+              <Button 
+                onClick={handleSearch} 
+                disabled={isSearching || searchTerm.length < 2}
+                className="w-full sm:w-auto whitespace-nowrap"
+              >
+                {isSearching ? (
+                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                ) : (
+                  <Search className="w-4 h-4 mr-2" />
+                )}
+                Rechercher
+              </Button>
+            </div>
+          </div>
+
+          {/* Résultats de recherche */}
+          {searchResults.length > 0 && (
+            <div className="space-y-2">
+              <h3 className="text-sm font-medium text-gray-700 flex items-center gap-2">
+                <Users className="w-4 h-4 text-primary-500" />
+                Résultats ({searchResults.length})
+              </h3>
+              <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                {searchResults.map((result) => (
+                  <UserResultItem 
+                    key={result.id} 
+                    user={result} 
+                    onSelect={() => handleUserSelect(result)} 
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Aucun résultat */}
+          {searchResults.length === 0 && searchTerm.length >= 2 && !isSearching && (
+            <div className="text-center py-8">
+              <div className="w-14 h-14 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                <Search className="w-7 h-7 text-gray-400" />
+              </div>
+              <h4 className="text-base font-medium text-gray-700 mb-1">Aucun résultat</h4>
+              <p className="text-sm text-gray-500 max-w-xs mx-auto">
+                Aucun utilisateur ne correspond à "{searchTerm}". Essayez un autre terme.
+              </p>
+              <button
+                onClick={() => setSearchTerm('')}
+                className="mt-3 text-sm text-primary-600 hover:text-primary-700 font-medium"
+              >
+                Effacer la recherche
+              </button>
+            </div>
+          )}
+
+          {/* Récents */}
+          {recentUsers.length > 0 && searchResults.length === 0 && searchTerm.length < 2 && (
+            <div className="space-y-2">
+              <h3 className="text-sm font-medium text-gray-700 flex items-center gap-2">
+                <Clock className="w-4 h-4 text-gray-500" />
+                Récents
+                <span className="text-xs text-gray-400 font-normal ml-1">
+                  ({recentUsers.length} contact{recentUsers.length > 1 ? 's' : ''})
+                </span>
+              </h3>
+              <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                {recentUsers.map((recent) => (
+                  <UserResultItem 
+                    key={recent.id} 
+                    user={recent} 
+                    onSelect={() => handleUserSelect(recent)} 
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* État vide - Aucun récent */}
+          {recentUsers.length === 0 && searchResults.length === 0 && searchTerm.length < 2 && !isSearching && (
+            <div className="text-center py-10">
+              <div className="w-16 h-16 bg-gradient-to-br from-primary-50 to-spiritual-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                <UserPlus className="w-8 h-8 text-primary-400" />
+              </div>
+              <h4 className="text-base font-medium text-gray-700 mb-1">Aucune conversation récente</h4>
+              <p className="text-sm text-gray-500 max-w-xs mx-auto">
+                Commencez une conversation en recherchant un utilisateur par son nom ou son email.
+              </p>
+            </div>
+          )}
+        </div>
+      ) : (
+        // Écran de sélection de l'utilisateur
+        <div className="space-y-6 p-1">
+          <div className="bg-gradient-to-br from-gray-50 to-gray-100/50 rounded-xl p-4 border border-gray-200/50">
+            <div className="flex items-center space-x-4">
+              <div className="w-14 h-14 rounded-full overflow-hidden bg-gradient-to-br from-primary-500 to-spiritual-500 flex-shrink-0 shadow-md">
+                {selectedUser.avatar_url ? (
+                  <img 
+                    src={selectedUser.avatar_url} 
+                    alt={`${selectedUser.first_name} ${selectedUser.last_name}`}
+                    className="w-full h-full object-cover" 
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-white font-semibold text-xl">
+                    {selectedUser.first_name[0]}{selectedUser.last_name[0]}
+                  </div>
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="font-semibold text-gray-900 text-lg truncate">
+                  {selectedUser.first_name} {selectedUser.last_name}
+                </h3>
+                <div className="flex flex-wrap items-center gap-2 mt-0.5">
+                  <span className="text-sm text-gray-600">
+                    {selectedUser.role} • {selectedUser.level}
+                  </span>
+                  <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
+                  <span className="inline-flex items-center gap-1.5 text-xs text-green-600">
+                    <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
+                    En ligne
+                  </span>
+                </div>
+                {selectedUser.parish_name && (
+                  <p className="text-sm text-gray-500 truncate mt-0.5">
+                    {selectedUser.parish_name}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="firstMessage" className="block text-sm font-medium text-gray-700 mb-1.5">
+              Premier message <span className="text-gray-400 font-normal">(optionnel)</span>
+            </label>
+            <textarea
+              id="firstMessage"
+              value={firstMessage}
+              onChange={(e) => setFirstMessage(e.target.value)}
+              placeholder="Dites bonjour à {selectedUser.first_name}..."
+              rows={3}
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none transition-shadow text-sm"
+            />
+            <p className="text-xs text-gray-400 mt-1.5">
+              {firstMessage.length > 0 ? `${firstMessage.length} caractères` : 'Message facultatif'}
+            </p>
+          </div>
+
+          <div className="flex flex-col-reverse sm:flex-row sm:space-x-3 space-y-2 sm:space-y-0 pt-4 border-t border-gray-100">
+            <Button 
+              variant="outline" 
+              fullWidth 
+              onClick={() => setSelectedUser(null)}
+              className="sm:flex-1"
+            >
+              <X className="w-4 h-4 mr-2" />
+              Retour
+            </Button>
+            <Button
+              variant="primary"
+              fullWidth
+              onClick={handleCreateConversation}
+              loading={isCreating}
+              className="sm:flex-1"
+            >
+              <MessageCircle className="w-4 h-4 mr-2" />
+              Démarrer la conversation
+            </Button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+};
+
+interface UserResultItemProps {
+  user: SearchUserResult;
+  onSelect: () => void;
+}
+
+const UserResultItem: React.FC<UserResultItemProps> = ({ user, onSelect }) => {
+  return (
+    <button
+      onClick={onSelect}
+      className="w-full flex items-center space-x-3 p-3 rounded-xl hover:bg-gray-50 hover:border-gray-200 transition-all duration-200 text-left border border-transparent group"
+    >
+      <div className="w-11 h-11 rounded-full overflow-hidden bg-gradient-to-br from-primary-400 to-spiritual-400 flex-shrink-0 shadow-sm">
+        {user.avatar_url ? (
+          <img
+            src={user.avatar_url}
+            alt={`${user.first_name} ${user.last_name}`}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-white font-semibold text-base">
+            {user.first_name[0]}{user.last_name[0]}
+          </div>
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="font-medium text-gray-900 group-hover:text-primary-700 transition-colors truncate">
+          {user.first_name} {user.last_name}
+        </p>
+        <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+          <span className="text-xs text-gray-500">
+            {user.role} • {user.level}
+          </span>
+          <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
+          <span className="inline-flex items-center gap-1 text-xs text-green-600">
+            <span className="w-1 h-1 bg-green-500 rounded-full"></span>
+            En ligne
+          </span>
+        </div>
+        {user.parish_name && (
+          <p className="text-xs text-gray-400 truncate mt-0.5">{user.parish_name}</p>
+        )}
+      </div>
+      <div className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+        <div className="w-8 h-8 bg-primary-50 rounded-full flex items-center justify-center">
+          <MessageCircle className="w-4 h-4 text-primary-600" />
+        </div>
+      </div>
+    </button>
+  );
+};

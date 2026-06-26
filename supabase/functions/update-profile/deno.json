@@ -1,0 +1,12 @@
+{
+  "imports": {
+    "https://esm.sh/@supabase/supabase-js@2.86.0": "https://esm.sh/@supabase/supabase-js@2.86.0"
+  },
+  "tasks": {
+    "serve": "deno serve --allow-net --allow-env index.ts"
+  },
+  "compilerOptions": {
+    "allowJs": true,
+    "lib": ["deno.window", "esnext"]
+  }
+}

@@ -1,0 +1,100 @@
+-- =====================================================
+-- MIGRATION : Ajout des colonnes pour les fonctionnalités premium
+-- Date : 20/05/2026
+-- =====================================================
+
+-- 1. Table biblical_paths – Ajout des colonnes pour les parcours IA
+ALTER TABLE public.biblical_paths 
+ADD COLUMN IF NOT EXISTS category text,
+ADD COLUMN IF NOT EXISTS difficulty text CHECK (difficulty IN ('beginner', 'intermediate', 'advanced')),
+ADD COLUMN IF NOT EXISTS duration_days integer,
+ADD COLUMN IF NOT EXISTS steps jsonb DEFAULT '[]'::jsonb,
+ADD COLUMN IF NOT EXISTS user_id uuid REFERENCES public.profiles(id),
+ADD COLUMN IF NOT EXISTS is_ai_generated boolean DEFAULT false,
+ADD COLUMN IF NOT EXISTS is_premium boolean DEFAULT false,
+ADD COLUMN IF NOT EXISTS completion_rate integer DEFAULT 0;
+
+-- 2. Table location_meditations – Ajout des colonnes géolocalisées
+ALTER TABLE public.location_meditations 
+ADD COLUMN IF NOT EXISTS bible_verse text,
+ADD COLUMN IF NOT EXISTS verse_reference text,
+ADD COLUMN IF NOT EXISTS audio_url text,
+ADD COLUMN IF NOT EXISTS duration_minutes integer,
+ADD COLUMN IF NOT EXISTS latitude double precision,
+ADD COLUMN IF NOT EXISTS longitude double precision,
+ADD COLUMN IF NOT EXISTS radius_meters integer DEFAULT 100,
+ADD COLUMN IF NOT EXISTS location_type text CHECK (location_type IN ('church', 'cross', 'sacred_site', 'cemetery', 'pilgrimage_site')),
+ADD COLUMN IF NOT EXISTS language text DEFAULT 'fr' CHECK (language IN ('fr', 'fon', 'yoruba')),
+ADD COLUMN IF NOT EXISTS is_premium boolean DEFAULT false;
+
+-- 3. Table prayer_wall – Ajout des colonnes pour les objectifs
+ALTER TABLE public.prayer_wall 
+ADD COLUMN IF NOT EXISTS category text CHECK (category IN ('healing', 'family', 'work', 'guidance', 'gratitude', 'forgiveness', 'protection', 'peace')),
+ADD COLUMN IF NOT EXISTS target_prayer_count integer,
+ADD COLUMN IF NOT EXISTS is_answered boolean DEFAULT false,
+ADD COLUMN IF NOT EXISTS answered_at timestamp with time zone,
+ADD COLUMN IF NOT EXISTS testimony text,
+ADD COLUMN IF NOT EXISTS is_premium boolean DEFAULT false;
+
+-- 4. Table challenges – Ajout des colonnes pour les récompenses
+ALTER TABLE public.challenges 
+ADD COLUMN IF NOT EXISTS current_count integer DEFAULT 0,
+ADD COLUMN IF NOT EXISTS reward_type text CHECK (reward_type IN ('donation', 'badge', 'premium_access')),
+ADD COLUMN IF NOT EXISTS reward_amount integer,
+ADD COLUMN IF NOT EXISTS reward_currency text,
+ADD COLUMN IF NOT EXISTS reward_beneficiary_id uuid,
+ADD COLUMN IF NOT EXISTS reward_badge_id text,
+ADD COLUMN IF NOT EXISTS reward_description text,
+ADD COLUMN IF NOT EXISTS is_completed boolean DEFAULT false,
+ADD COLUMN IF NOT EXISTS completed_at timestamp with time zone;
+
+-- 5. Table challenge_participants – Ajout de la colonne is_active (déjà présente, juste vérifier)
+ALTER TABLE public.challenge_participants 
+ADD COLUMN IF NOT EXISTS is_active boolean DEFAULT true;
+
+-- 6. Table spiritual_badges – Déjà complète, ajout des index
+CREATE INDEX IF NOT EXISTS idx_spiritual_badges_category ON public.spiritual_badges(category);
+CREATE INDEX IF NOT EXISTS idx_spiritual_badges_rarity ON public.spiritual_badges(rarity);
+
+-- 7. Table user_badges – Déjà complète, ajout des index
+CREATE INDEX IF NOT EXISTS idx_user_badges_user_id ON public.user_badges(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_badges_badge_id ON public.user_badges(badge_id);
+
+-- 8. Mise à jour de la vue spiritual_ranking (re-création)
+DROP VIEW IF EXISTS public.spiritual_ranking;
+
+CREATE VIEW public.spiritual_ranking AS
+SELECT 
+    p.id as user_id,
+    p.first_name,
+    p.last_name,
+    p.avatar_url,
+    COALESCE(SUM(sb.points_value), 0) as total_points,
+    COUNT(ub.id) as badges_count,
+    RANK() OVER (ORDER BY COALESCE(SUM(sb.points_value), 0) DESC) as rank
+FROM public.profiles p
+LEFT JOIN public.user_badges ub ON p.id = ub.user_id
+LEFT JOIN public.spiritual_badges sb ON ub.badge_id = sb.id
+GROUP BY p.id;
+
+-- 9. Création de la table biblical_steps (si vous voulez normaliser, ou on utilise JSONB)
+-- Option JSONB : déjà ajoutée via steps jsonb dans biblical_paths
+-- Option normalisée (décommentez si préféré)
+/*
+CREATE TABLE IF NOT EXISTS public.biblical_steps (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    path_id uuid NOT NULL REFERENCES public.biblical_paths(id) ON DELETE CASCADE,
+    day_number integer NOT NULL,
+    title text NOT NULL,
+    description text NOT NULL,
+    bible_verse text NOT NULL,
+    verse_reference text NOT NULL,
+    audio_url text,
+    meditation_text text,
+    reflection_questions jsonb DEFAULT '[]'::jsonb,
+    is_completed boolean DEFAULT false,
+    completed_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now(),
+    PRIMARY KEY (id)
+);
+*/

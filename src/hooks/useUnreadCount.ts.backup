@@ -1,0 +1,92 @@
+import { useState, useEffect, useCallback } from 'react';
+import { supabase } from '../lib/supabase';
+
+interface UseUnreadCountProps {
+  conversationId: string;
+  enabled?: boolean;
+}
+
+export const useUnreadCount = ({ conversationId, enabled = true }: UseUnreadCountProps) => {
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const fetchUnreadCount = useCallback(async () => {
+    if (!enabled || !conversationId) return;
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error } = await supabase
+        .rpc('get_unread_count', {
+          conversation_id: conversationId,
+          user_id: user.id,
+        });
+
+      if (error) throw error;
+      setUnreadCount(data || 0);
+    } catch (error) {
+      console.error('Error fetching unread count:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [conversationId, enabled]);
+
+  const markAsRead = useCallback(async () => {
+    if (!enabled || !conversationId) return;
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // Marquer tous les messages non lus comme lus
+      const { data: messages } = await supabase
+        .from('messages')
+        .select('id')
+        .eq('conversation_id', conversationId)
+        .neq('sender_id', user.id);
+
+      if (messages && messages.length > 0) {
+        for (const msg of messages) {
+          await supabase.rpc('mark_message_as_read', {
+            message_id: msg.id,
+            user_id: user.id,
+          });
+        }
+      }
+
+      setUnreadCount(0);
+    } catch (error) {
+      console.error('Error marking messages as read:', error);
+    }
+  }, [conversationId, enabled]);
+
+  // S'abonner aux nouveaux messages pour mettre à jour le compteur
+  useEffect(() => {
+    if (!enabled || !conversationId) return;
+
+    const channel = supabase
+      .channel(`unread:${conversationId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        () => {
+          fetchUnreadCount();
+        }
+      )
+      .subscribe();
+
+    fetchUnreadCount();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [conversationId, enabled, fetchUnreadCount]);
+
+  return { unreadCount, isLoading, markAsRead, refetch: fetchUnreadCount };
+};

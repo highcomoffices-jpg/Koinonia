@@ -1,0 +1,151 @@
+import { supabase } from '../lib/supabase';
+import type { Database } from '../lib/database.types';
+
+type SettingsRow = Database['public']['Tables']['settings']['Row'];
+
+export interface SpiritualLevelThresholds {
+  sowerMax: number;
+  harvesterMin: number;
+  harvesterMax: number;
+  friendMin: number;
+  friendMax: number;
+}
+
+class SettingsService {
+  // ============================================
+  // GESTION DES SEUILS SPIRITUELS
+  // ============================================
+
+  // Récupérer les seuils actuels
+  async getSpiritualThresholds(): Promise<SpiritualLevelThresholds> {
+    try {
+      const keys = [
+        'spiritual_level_sower_max',
+        'spiritual_level_harvester_min',
+        'spiritual_level_harvester_max',
+        'spiritual_level_friend_min',
+        'spiritual_level_friend_max'
+      ];
+
+      const { data, error } = await supabase
+        .from('settings')
+        .select('key, value')
+        .in('key', keys);
+
+      if (error) throw error;
+
+      const thresholds: Record<string, number> = {};
+      data?.forEach(item => {
+        // La valeur est stockée comme jsonb, on prend le premier élément
+        const value = item.value;
+        if (Array.isArray(value) && value.length > 0) {
+          thresholds[item.key] = parseInt(value[0]) || 0;
+        } else if (typeof value === 'number') {
+          thresholds[item.key] = value;
+        } else {
+          thresholds[item.key] = 0;
+        }
+      });
+
+      return {
+        sowerMax: thresholds['spiritual_level_sower_max'] || 9999,
+        harvesterMin: thresholds['spiritual_level_harvester_min'] || 10000,
+        harvesterMax: thresholds['spiritual_level_harvester_max'] || 49999,
+        friendMin: thresholds['spiritual_level_friend_min'] || 50000,
+        friendMax: thresholds['spiritual_level_friend_max'] || 99999
+      };
+    } catch (error) {
+      console.error('Error fetching spiritual thresholds:', error);
+      return {
+        sowerMax: 9999,
+        harvesterMin: 10000,
+        harvesterMax: 49999,
+        friendMin: 50000,
+        friendMax: 99999
+      };
+    }
+  }
+
+  // Mettre à jour un seuil (réservé aux admins)
+  async updateSpiritualThreshold(key: string, value: number): Promise<boolean> {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('User not authenticated');
+
+      // Vérifier que l’utilisateur est admin
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single();
+
+      if (profileError) throw profileError;
+      if (profile.role !== 'admin') throw new Error('Insufficient permissions');
+
+      const { error } = await supabase
+        .from('settings')
+        .upsert({
+          key,
+          value: [value],
+          updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'key'
+        });
+
+      if (error) throw error;
+      return true;
+    } catch (error) {
+      console.error('Error updating spiritual threshold:', error);
+      return false;
+    }
+  }
+
+  // Obtenir une valeur de configuration par clé
+  async getSetting<T>(key: string, defaultValue: T): Promise<T> {
+    try {
+      const { data, error } = await supabase
+        .from('settings')
+        .select('value')
+        .eq('key', key)
+        .single();
+
+      if (error) throw error;
+
+      // La valeur est stockée comme jsonb
+      const value = data.value;
+      if (Array.isArray(value) && value.length > 0) {
+        return value[0] as T;
+      }
+      return value as T;
+    } catch (error) {
+      console.warn(`Setting ${key} not found, using default:`, defaultValue);
+      return defaultValue;
+    }
+  }
+
+  // Définir une valeur de configuration
+  async setSetting(key: string, value: any): Promise<boolean> {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('User not authenticated');
+
+      const { error } = await supabase
+        .from('settings')
+        .upsert({
+          key,
+          value: Array.isArray(value) ? value : [value],
+          updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'key'
+        });
+
+      if (error) throw error;
+      return true;
+    } catch (error) {
+      console.error('Error setting setting:', error);
+      return false;
+    }
+  }
+}
+
+export const settingsService = new SettingsService();

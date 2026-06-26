@@ -1,0 +1,390 @@
+import React, { useState, useEffect } from 'react';
+import { X, MapPin, Church, User } from 'lucide-react';
+import { Button } from '../ui/Button';
+import { Select } from '../ui/Select';
+import { useAuth } from '../../contexts/AuthContext';
+import { useGeoData } from '../../hooks/useGeoData';
+
+interface CompleteProfileModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onComplete: () => void;
+}
+
+export const CompleteProfileModal: React.FC<CompleteProfileModalProps> = ({
+  isOpen,
+  onClose,
+  onComplete,
+}) => {
+  const { user, updateProfile, refreshUser } = useAuth();
+  const { 
+    continents,
+    countries,
+    allCities,
+    confessions, 
+    parishes,
+    isLoadingCities,
+    loadCountriesByContinent,
+    loadCitiesByCountry,
+    loadParishesByCityAndConfession 
+  } = useGeoData();
+
+  const [selectedContinent, setSelectedContinent] = useState('');
+  const [formData, setFormData] = useState({
+    country_id: '',
+    city_id: '',
+    confession_id: '',
+    parish_id: '',
+    bio: '',
+    default_visibility: 'public',
+  });
+
+  const [isLoading, setIsLoading] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Initialiser le formulaire avec les données utilisateur existantes
+  useEffect(() => {
+    if (user && isOpen) {
+      setFormData({
+        country_id: user.country?.id || '',
+        city_id: user.city?.id || '',
+        confession_id: user.confession?.id || '',
+        parish_id: user.parish?.id || '',
+        bio: user.bio || '',
+        default_visibility: user.defaultVisibility || 'public',
+      });
+    }
+  }, [user, isOpen]);
+
+  // Charger les pays quand le continent change
+  useEffect(() => {
+    if (selectedContinent && isOpen) {
+      loadCountriesByContinent(selectedContinent);
+      setFormData(prev => ({ ...prev, country_id: '' }));
+    }
+  }, [selectedContinent, loadCountriesByContinent, isOpen]);
+
+  // Charger les villes quand le pays change
+  useEffect(() => {
+    if (formData.country_id && isOpen) {
+      loadCitiesByCountry(formData.country_id);
+      setFormData(prev => ({ ...prev, city_id: '' }));
+    }
+  }, [formData.country_id, loadCitiesByCountry, isOpen]);
+
+  // Charger les paroisses quand ville ou confession change
+  useEffect(() => {
+    if ((formData.city_id || formData.confession_id) && isOpen) {
+      loadParishesByCityAndConfession(formData.city_id, formData.confession_id);
+    }
+  }, [formData.city_id, formData.confession_id, loadParishesByCityAndConfession, isOpen]);
+
+  const continentOptions = continents.map(continent => ({
+    value: continent.id,
+    label: continent.name,
+  }));
+
+  const countryOptions = countries.map(country => ({
+    value: country.id,
+    label: country.name,
+  }));
+
+  const cityOptions = allCities.map(city => ({
+    value: city.id,
+    label: city.name,
+  }));
+
+  const confessionOptions = confessions.map(confession => ({
+    value: confession.id,
+    label: confession.name,
+  }));
+
+  const parishOptions = parishes
+    .filter(parish => {
+      if (formData.city_id && parish.city_id !== formData.city_id) return false;
+      if (formData.confession_id && parish.confession_id !== formData.confession_id) return false;
+      return true;
+    })
+    .map(parish => ({
+      value: parish.id,
+      label: parish.name,
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    
+    if (name === 'continentId') {
+      setSelectedContinent(value);
+      setFormData(prev => ({ ...prev, country_id: '', city_id: '' }));
+      return;
+    }
+    
+    setFormData(prev => {
+      const newData = { ...prev, [name]: value };
+      
+      // Réinitialiser la paroisse si ville ou confession change
+      if ((name === 'city_id' || name === 'confession_id') && prev.parish_id) {
+        newData.parish_id = '';
+      }
+      
+      return newData;
+    });
+    
+    if (errors[name]) {
+      setErrors(prev => ({ ...prev, [name]: '' }));
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setErrors({});
+
+    try {
+      if (!user) throw new Error('Utilisateur non trouvé');
+
+      // Validation
+      const validationErrors: Record<string, string> = {};
+      
+      if (!formData.country_id) {
+        validationErrors.country_id = 'Le pays est requis';
+      }
+      
+      if (!formData.city_id) {
+        validationErrors.city_id = 'La ville est requise';
+      }
+      
+      if (!formData.confession_id) {
+        validationErrors.confession_id = 'La confession est requise';
+      }
+      
+      if (Object.keys(validationErrors).length > 0) {
+        setErrors(validationErrors);
+        setIsLoading(false);
+        return;
+      }
+
+      const updateData = {
+        country_id: formData.country_id,
+        city_id: formData.city_id,
+        confession_id: formData.confession_id,
+        profile_complete: true,
+        default_visibility: formData.default_visibility,
+        ...(formData.parish_id && { parish_id: formData.parish_id }),
+        ...(formData.bio && { bio: formData.bio }),
+      };
+
+      await updateProfile(updateData);
+      await refreshUser();
+      onComplete();
+      onClose();
+    } catch (error: any) {
+      console.error('Error:', error);
+      setErrors({
+        general: error.message || 'Une erreur est survenue',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const visibilityOptions = [
+    { value: 'public', label: 'Public – Tout le monde' },
+    { value: 'subscribers', label: 'Abonnés – Mes abonnés uniquement' },
+    { value: 'parish', label: 'Paroisse – Ma paroisse uniquement' },
+  ];
+
+  if (!isOpen || !user) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-50">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        {/* Header */}
+        <div className="sticky top-0 bg-white border-b border-gray-200 p-6 rounded-t-2xl">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900">Compléter votre profil</h2>
+              <p className="text-gray-600 mt-1">Quelques informations pour personnaliser votre expérience</p>
+            </div>
+            <button
+              onClick={onClose}
+              className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+              disabled={isLoading}
+            >
+              <X className="w-5 h-5 text-gray-500" />
+            </button>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="p-6">
+          {errors.general && (
+            <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4">
+              <p className="text-red-600">{errors.general}</p>
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Informations personnelles */}
+            <div className="flex items-center space-x-4 p-4 bg-gray-50 rounded-lg">
+              <div className="w-16 h-16 bg-gradient-to-br from-primary-400 to-spiritual-400 rounded-full flex items-center justify-center">
+                <div className="text-white text-xl font-bold">
+                  {user.firstName?.[0]}{user.lastName?.[0]}
+                </div>
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-900">
+                  {user.firstName} {user.lastName}
+                </h3>
+                <p className="text-sm text-gray-600">{user.email}</p>
+              </div>
+            </div>
+
+            {/* Localisation avec hiérarchie continent → pays → ville */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold text-gray-900 flex items-center">
+                <MapPin className="w-5 h-5 mr-2 text-primary-600" />
+                Localisation
+              </h3>
+              
+              <Select
+                label="Continent"
+                name="continentId"
+                value={selectedContinent}
+                onChange={handleChange}
+                options={continentOptions}
+                placeholder="Sélectionnez votre continent"
+                error={errors.continentId}
+                disabled={isLoading}
+              />
+
+              <Select
+                label="Pays"
+                name="country_id"
+                value={formData.country_id}
+                onChange={handleChange}
+                options={countryOptions}
+                placeholder={selectedContinent ? "Sélectionnez votre pays" : "Sélectionnez d'abord un continent"}
+                error={errors.country_id}
+                disabled={isLoading || !selectedContinent}
+              />
+
+              <Select
+                label="Ville"
+                name="city_id"
+                value={formData.city_id}
+                onChange={handleChange}
+                options={cityOptions}
+                placeholder={formData.country_id ? "Sélectionnez votre ville" : "Sélectionnez d'abord un pays"}
+                error={errors.city_id}
+                disabled={isLoading || !formData.country_id || isLoadingCities}
+                loading={isLoadingCities}
+              />
+            </div>
+
+            {/* Informations religieuses */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold text-gray-900 flex items-center">
+                <Church className="w-5 h-5 mr-2 text-spiritual-600" />
+                Confession religieuse
+              </h3>
+              
+              <Select
+                label="Confession religieuse"
+                name="confession_id"
+                value={formData.confession_id}
+                onChange={handleChange}
+                options={confessionOptions}
+                placeholder="Sélectionnez votre confession"
+                error={errors.confession_id}
+                disabled={isLoading}
+                required
+              />
+
+              <Select
+                label="Paroisse/Église (optionnel)"
+                name="parish_id"
+                value={formData.parish_id}
+                onChange={handleChange}
+                options={parishOptions}
+                placeholder="Sélectionnez votre paroisse"
+                error={errors.parish_id}
+                disabled={isLoading || !formData.city_id || !formData.confession_id}
+                helpText={parishOptions.length === 0 && (formData.city_id && formData.confession_id) ? "Aucune paroisse trouvée" : undefined}
+              />
+            </div>
+
+            {/* Visibilité par défaut */}
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 flex items-center mb-4">
+                <User className="w-5 h-5 mr-2 text-gray-600" />
+                Confidentialité
+              </h3>
+              
+              <Select
+                label="Visibilité par défaut des publications"
+                name="default_visibility"
+                value={formData.default_visibility}
+                onChange={handleChange}
+                options={visibilityOptions}
+                placeholder="Sélectionnez la visibilité par défaut"
+                error={errors.default_visibility}
+                disabled={isLoading}
+              />
+            </div>
+
+            {/* Bio */}
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 flex items-center mb-4">
+                <User className="w-5 h-5 mr-2 text-gray-600" />
+                À propos de vous
+              </h3>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Biographie (optionnel)
+                </label>
+                <textarea
+                  name="bio"
+                  value={formData.bio}
+                  onChange={handleChange}
+                  placeholder="Parlez-nous un peu de vous..."
+                  rows={3}
+                  maxLength={500}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-colors resize-none disabled:bg-gray-100"
+                  disabled={isLoading}
+                />
+                <div className="flex justify-between mt-1">
+                  <p className="text-xs text-gray-500">
+                    {formData.bio.length}/500 caractères
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={onClose}
+                disabled={isLoading}
+              >
+                Plus tard
+              </Button>
+              <Button
+                type="submit"
+                variant="spiritual"
+                loading={isLoading}
+                disabled={isLoading}
+              >
+                {isLoading ? 'Enregistrement...' : 'Terminer'}
+              </Button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+};

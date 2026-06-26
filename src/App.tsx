@@ -1,0 +1,379 @@
+import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { useAuth } from './contexts/AuthContext';
+import { Header } from './components/layout/Header';
+import { Navigation } from './components/layout/Navigation';
+import { LoginForm } from './components/auth/LoginForm';
+import { RegisterPhase1 } from './components/auth/RegisterPhase1';
+import { RegisterPhase2 } from './components/auth/RegisterPhase2';
+import { HomePage } from './components/home/HomePage';
+import { ProfilePage } from './components/profile/ProfilePage';
+import { ParishesPage } from './components/parishes/ParishesPage';
+import { MarketPage } from './components/market/MarketPage';
+import { SpiritualityPage } from './components/spirituality/SpiritualityPage';
+import { FormationsPage } from './components/formations/FormationsPage';
+import { ActivitiesPage } from './components/activities/ActivitiesPage';
+import { GroupsPage } from './components/groups/GroupsPage';
+import { ChatPage } from './components/chat/ChatPage';
+import { LiveCelebrationsPage } from './components/live-celebrations/LiveCelebrationsPage';
+import { ValidateCreatorModal } from './components/admin/ValidateCreatorModal';
+import { ValidateParishModal } from './components/admin/ValidateParishModal';
+import { SettingsPanel } from './components/admin/SettingsPanel';
+import { ReportsPanel } from './components/moderation/ReportsPanel';
+import { FinanceDashboard } from './components/finance/FinanceDashboard';
+import { AdminDashboard } from './components/admin/AdminDashboard';
+import { NotificationsPage } from './components/notifications/NotificationsPage';
+import { SettingsPage } from './components/settings/SettingsPage';
+import { KoinoniaAdminDashboard } from './components/admin/KoinoniaAdminDashboard';
+import { ParishManagementDashboard } from './components/parish/ParishManagementDashboard';
+import { Modal } from './components/ui/Modal';
+import './i18n';
+
+type AuthView = 'login' | 'register-phase1' | 'register-phase2';
+type AdminModalType = 'validateCreator' | 'validateParish' | 'settings' | 'reports' | 'finance' | 'adminDashboard' | null;
+
+// Composant wrapper pour la protection des routes
+const ProtectedRoute: React.FC<{ 
+  children: React.ReactNode; 
+  requireSuperAdmin?: boolean; 
+  requireShepherd?: boolean;
+  isSuperAdmin?: boolean;
+  isShepherd?: boolean;
+}> = ({ 
+  children, 
+  requireSuperAdmin = false, 
+  requireShepherd = false,
+  isSuperAdmin = false,
+  isShepherd = false
+}) => {
+  if (requireSuperAdmin && !isSuperAdmin) {
+    return <Navigate to="/" replace />;
+  }
+
+  if (requireShepherd && !isShepherd) {
+    return <Navigate to="/" replace />;
+  }
+
+  return <>{children}</>;
+};
+
+const saveRemindLaterChoice = (userId: string, hours: number = 24): void => {
+  try {
+    const expiry = Date.now() + (hours * 60 * 60 * 1000);
+    localStorage.setItem(`koinonia_remind_later_${userId}`, expiry.toString());
+  } catch (error) {
+    console.error('Error saving remind later choice:', error);
+  }
+};
+
+const hasRemindLaterChoice = (userId: string): boolean => {
+  try {
+    const expiry = localStorage.getItem(`koinonia_remind_later_${userId}`);
+    if (!expiry) return false;
+    const expiryTime = parseInt(expiry, 10);
+    const isValid = Date.now() < expiryTime;
+    if (!isValid) {
+      localStorage.removeItem(`koinonia_remind_later_${userId}`);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    return false;
+  }
+};
+
+const clearRemindLaterChoice = (userId: string): void => {
+  try {
+    localStorage.removeItem(`koinonia_remind_later_${userId}`);
+  } catch (error) {
+    console.error('Error clearing remind later choice:', error);
+  }
+};
+
+function App() {
+  const { user, isLoading, isSuperAdmin, isShepherd } = useAuth();
+
+  useEffect(() => {
+    console.log('🔍 DEBUG App - isLoading:', isLoading);
+    console.log('🔍 DEBUG App - user:', user ? user.email : 'null');
+  }, [isLoading, user]);
+
+  const [authView, setAuthView] = useState<AuthView>('login');
+  const [activeTab, setActiveTab] = useState('home');
+  const [hasSkippedProfileCompletion, setHasSkippedProfileCompletion] = useState(false);
+  const [showProfileReminder, setShowProfileReminder] = useState(false);
+  const [adminModal, setAdminModal] = useState<AdminModalType>(null);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    if (user && !user.profileComplete) {
+      const hasChoice = hasRemindLaterChoice(user.id);
+      setHasSkippedProfileCompletion(hasChoice);
+      if (hasChoice && activeTab !== 'profile') {
+        setShowProfileReminder(true);
+      }
+    }
+  }, [user, activeTab]);
+
+  const toggleSidebar = () => {
+    setIsSidebarOpen(!isSidebarOpen);
+  };
+
+  const closeSidebar = () => {
+    setIsSidebarOpen(false);
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-primary-50 via-white to-spiritual-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 bg-gradient-to-br from-primary-600 to-spiritual-600 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse-soft">
+            <div className="w-8 h-8 border-2 border-white rounded-full flex items-center justify-center">
+              <div className="w-4 h-4 bg-white rounded-full"></div>
+            </div>
+          </div>
+          <p className="text-gray-600">Chargement de Koinonia...</p>
+          <p className="text-sm text-gray-500 mt-2">Connexion à la base de données...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    switch (authView) {
+      case 'login':
+        return <LoginForm onSwitchToRegister={() => setAuthView('register-phase1')} />;
+      case 'register-phase1':
+        return (
+          <RegisterPhase1 
+            onSwitchToLogin={() => setAuthView('login')}
+            onPhase1Complete={() => setAuthView('register-phase2')}
+          />
+        );
+      case 'register-phase2':
+        return <RegisterPhase2 />;
+      default:
+        return <LoginForm onSwitchToRegister={() => setAuthView('register-phase1')} />;
+    }
+  }
+
+  if (user && !user.profileComplete && !hasSkippedProfileCompletion && activeTab !== 'profile') {
+    const handleRemindLater = () => {
+      if (user) {
+        saveRemindLaterChoice(user.id, 24);
+        setHasSkippedProfileCompletion(true);
+        setShowProfileReminder(true);
+        setActiveTab('home');
+      }
+    };
+
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-primary-50 via-white to-spiritual-50 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 text-center">
+          <div className="w-20 h-20 bg-gradient-to-br from-primary-600 to-spiritual-600 rounded-full flex items-center justify-center mx-auto mb-6">
+            <div className="w-10 h-10 border-3 border-white rounded-full flex items-center justify-center">
+              <div className="w-5 h-5 bg-white rounded-full"></div>
+            </div>
+          </div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-3">Complétez votre profil</h2>
+          <p className="text-gray-600 mb-6">
+            Pour profiter pleinement de Koinonia, merci de compléter votre profil en ajoutant votre ville, confession et paroisse.
+          </p>
+          <div className="mb-4 p-4 bg-gray-50 rounded-lg text-left">
+            <h3 className="font-medium text-gray-900 mb-2">Avantages :</h3>
+            <ul className="text-sm text-gray-600 space-y-1">
+              <li>• Accès aux services de votre confession</li>
+              <li>• Connexion avec votre communauté locale</li>
+              <li>• Recommandations personnalisées</li>
+              <li>• Toutes les fonctionnalités débloquées</li>
+            </ul>
+          </div>
+          <button
+            onClick={() => {
+              setActiveTab('profile');
+              clearRemindLaterChoice(user.id);
+            }}
+            className="w-full bg-gradient-to-r from-primary-600 to-spiritual-600 text-white font-medium py-3 px-4 rounded-xl hover:opacity-90 transition-opacity mb-3"
+          >
+            Compléter mon profil
+          </button>
+          <button
+            onClick={handleRemindLater}
+            className="w-full text-primary-600 font-medium py-3 px-4 rounded-xl hover:bg-primary-50 transition-colors border border-primary-200"
+          >
+            Plus tard
+          </button>
+          <div className="mt-6 pt-6 border-t border-gray-200">
+            <p className="text-sm text-gray-500">
+              <span className="font-medium text-amber-600">Note :</span> Certaines fonctionnalités seront limitées jusqu'à ce que vous complétiez votre profil.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const renderMainContent = () => {
+    switch (activeTab) {
+      case 'home': return <HomePage />;
+      case 'parishes': return <ParishesPage />;
+      case 'market': return <MarketPage />;
+      case 'spirituality': return <SpiritualityPage />;
+      case 'formations': return <FormationsPage />;
+      case 'activities': return <ActivitiesPage />;
+      case 'groups': return <GroupsPage />;
+      case 'live-celebrations': return <LiveCelebrationsPage />;
+      case 'lives': return <LiveCelebrationsPage />;
+      case 'chat': return <ChatPage />;
+      case 'profile': return <ProfilePage />;
+      case 'admin-dashboard': return <AdminDashboard />;
+      case 'koinonia-admin': return <KoinoniaAdminDashboard />;
+      case 'parish-management': return <ParishManagementDashboard />;
+      case 'notifications': return <NotificationsPage />;
+      case 'settings': return <SettingsPage />;
+      case 'create': return <HomePage />;
+      case 'subscriptions':
+        return (
+          <div className="max-w-4xl mx-auto p-4">
+            <h1 className="text-2xl font-bold text-gray-900 mb-4">Mes abonnements</h1>
+            <p className="text-gray-600">Fonctionnalité en cours de développement...</p>
+          </div>
+        );
+      default: return <HomePage />;
+    }
+  };
+
+  const handleCloseReminder = () => setShowProfileReminder(false);
+  const handleRemindLaterAgain = () => {
+    if (user) {
+      saveRemindLaterChoice(user.id, 24);
+      setShowProfileReminder(false);
+    }
+  };
+
+  const shepherdGrade = (user as any)?.shepherdGrade;
+  const isAdmin = user?.role === 'admin';
+
+  const renderWithRoutes = () => {
+    if (activeTab === 'koinonia-admin') {
+      return (
+        <ProtectedRoute requireSuperAdmin isSuperAdmin={isSuperAdmin}>
+          <KoinoniaAdminDashboard />
+        </ProtectedRoute>
+      );
+    }
+    
+    if (activeTab === 'parish-management') {
+      return (
+        <ProtectedRoute requireShepherd isShepherd={isShepherd}>
+          <ParishManagementDashboard />
+        </ProtectedRoute>
+      );
+    }
+    
+    return renderMainContent();
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <Header 
+        onAdminModalOpen={setAdminModal} 
+        isSidebarOpen={isSidebarOpen}
+        onToggleSidebar={toggleSidebar}
+      />
+      <div className="flex">
+        <Navigation 
+          activeTab={activeTab} 
+          onTabChange={setActiveTab} 
+          onAdminModalOpen={setAdminModal}
+          shepherdGrade={shepherdGrade}
+          isAdmin={isAdmin}
+          isSidebarOpen={isSidebarOpen}
+          onCloseSidebar={closeSidebar}
+        />
+        
+        <main className="flex-1 md:ml-64">
+          {showProfileReminder && user && !user.profileComplete && activeTab !== 'profile' && (
+            <div className="bg-gradient-to-r from-amber-50 to-warm-50 border-b border-amber-200 px-4 py-3">
+              <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-3 sm:space-y-0">
+                <div className="flex items-start space-x-3">
+                  <div className="w-8 h-8 bg-gradient-to-r from-amber-500 to-warm-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <span className="text-white text-sm font-bold">!</span>
+                  </div>
+                  <div>
+                    <p className="text-amber-800 font-medium">Votre profil n'est pas complet</p>
+                    <p className="text-amber-700 text-sm">Complétez-le pour débloquer toutes les fonctionnalités de Koinonia.</p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => {
+                      setActiveTab('profile');
+                      setShowProfileReminder(false);
+                      clearRemindLaterChoice(user.id);
+                    }}
+                    className="px-4 py-2 bg-gradient-to-r from-primary-600 to-spiritual-600 text-white rounded-lg hover:opacity-90 transition-opacity text-sm font-medium whitespace-nowrap"
+                  >
+                    Compléter maintenant
+                  </button>
+                  <button
+                    onClick={handleRemindLaterAgain}
+                    className="px-4 py-2 text-amber-700 hover:bg-amber-100 rounded-lg transition-colors text-sm font-medium whitespace-nowrap"
+                  >
+                    Rappeler dans 24h
+                  </button>
+                  <button
+                    onClick={handleCloseReminder}
+                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors text-sm font-medium whitespace-nowrap"
+                  >
+                    Fermer
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {renderWithRoutes()}
+        </main>
+      </div>
+
+      {adminModal === 'validateCreator' && (
+        <ValidateCreatorModal
+          isOpen={true}
+          onClose={() => setAdminModal(null)}
+          onSuccess={() => setAdminModal(null)}
+        />
+      )}
+      {adminModal === 'validateParish' && (
+        <ValidateParishModal
+          isOpen={true}
+          onClose={() => setAdminModal(null)}
+          onSuccess={() => setAdminModal(null)}
+        />
+      )}
+      {adminModal === 'settings' && (
+        <Modal isOpen={true} onClose={() => setAdminModal(null)} title="Configuration des seuils spirituels" size="lg">
+          <SettingsPanel />
+        </Modal>
+      )}
+      {adminModal === 'reports' && (
+        <Modal isOpen={true} onClose={() => setAdminModal(null)} title="Gestion des signalements" size="lg">
+          <ReportsPanel />
+        </Modal>
+      )}
+      {adminModal === 'finance' && (
+        <Modal isOpen={true} onClose={() => setAdminModal(null)} title="Tableau de bord financier" size="lg">
+          <FinanceDashboard />
+        </Modal>
+      )}
+      {adminModal === 'adminDashboard' && (
+        <Modal isOpen={true} onClose={() => setAdminModal(null)} title="Administration" size="lg">
+          <AdminDashboard />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+export default App;
