@@ -9,6 +9,7 @@ import { RegisterPhase1 } from './components/auth/RegisterPhase1';
 import { RegisterPhase2 } from './components/auth/RegisterPhase2';
 import { ResetPasswordPage } from './components/auth/ResetPasswordPage';
 import { EmailConfirmationPage } from './components/auth/EmailConfirmationPage';
+import { PoliciesPage } from './components/auth/PoliciesPage';
 import { HomePage } from './components/home/HomePage';
 import { ProfilePage } from './components/profile/ProfilePage';
 import { ParishesPage } from './components/parishes/ParishesPage';
@@ -228,6 +229,11 @@ function App() {
     // Page de confirmation d'email
     if (window.location.pathname === '/confirm-email') {
       return <EmailConfirmationPage />;
+    }
+
+    // Page des politiques
+    if (window.location.pathname === '/policies') {
+      return <PoliciesPage />;
     }
 
     switch (activeTab) {
