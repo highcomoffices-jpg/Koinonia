@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Mail, Lock, User, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { supabase } from '../../lib/supabase';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Select } from '../ui/Select';
@@ -42,6 +43,7 @@ export const RegisterPhase1: React.FC<RegisterPhase1Props> = ({
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isEmailSent, setIsEmailSent] = useState(false);
 
   // Charger les pays quand le continent change
   useEffect(() => {
@@ -99,6 +101,7 @@ export const RegisterPhase1: React.FC<RegisterPhase1Props> = ({
 
     setIsSubmitting(true);
     setErrors({});
+    setIsEmailSent(false);
 
     try {
       await registerPhase1({
@@ -109,7 +112,13 @@ export const RegisterPhase1: React.FC<RegisterPhase1Props> = ({
         confirmPassword: formData.confirmPassword,
         countryId: formData.countryId,
       });
-      onPhase1Complete();
+      
+      // Après une inscription réussie, afficher un message de confirmation
+      setIsEmailSent(true);
+      
+      // Ne pas appeler onPhase1Complete immédiatement
+      // L'utilisateur doit d'abord confirmer son email
+      
     } catch (error: any) {
       console.error('Registration error:', error);
       
@@ -165,6 +174,25 @@ export const RegisterPhase1: React.FC<RegisterPhase1Props> = ({
     }
   };
 
+  const handleResendConfirmation = async () => {
+    if (!formData.email) return;
+    
+    try {
+      await supabase.auth.resend({
+        type: 'signup',
+        email: formData.email
+      });
+      setErrors({
+        general: 'Un nouveau lien de confirmation a été envoyé à votre adresse email.'
+      });
+    } catch (error) {
+      console.error('Erreur lors du renvoi du lien:', error);
+      setErrors({
+        general: 'Erreur lors du renvoi du lien. Veuillez réessayer plus tard.'
+      });
+    }
+  };
+
   const continentOptions = continents.map(continent => ({
     value: continent.id,
     label: continent.name,
@@ -176,6 +204,43 @@ export const RegisterPhase1: React.FC<RegisterPhase1Props> = ({
   }));
 
   const isLoading = authLoading || isSubmitting;
+
+  // Affichage du message de confirmation d'email
+  if (isEmailSent) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-primary-50 via-white to-spiritual-50 flex items-center justify-center p-4">
+        <Card className="w-full max-w-md text-center">
+          <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
+            <Mail className="w-10 h-10 text-green-600" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-3">📧 Vérifiez votre email</h2>
+          <p className="text-gray-600 mb-4">
+            Un email de confirmation a été envoyé à <strong>{formData.email}</strong>.
+          </p>
+          <p className="text-sm text-gray-500 mb-6">
+            Veuillez cliquer sur le lien dans l'email pour activer votre compte avant de vous connecter.
+          </p>
+          <div className="space-y-3">
+            <button
+              onClick={handleResendConfirmation}
+              className="w-full text-primary-600 font-medium py-2 px-4 rounded-xl hover:bg-primary-50 transition-colors border border-primary-200"
+            >
+              Renvoyer le lien de confirmation
+            </button>
+            <button
+              onClick={() => {
+                setIsEmailSent(false);
+                onSwitchToLogin();
+              }}
+              className="w-full text-gray-600 font-medium py-2 px-4 rounded-xl hover:bg-gray-50 transition-colors border border-gray-200"
+            >
+              Retour à la connexion
+            </button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary-50 via-white to-spiritual-50 flex items-center justify-center p-4">
