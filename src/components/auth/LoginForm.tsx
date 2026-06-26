@@ -31,27 +31,24 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToRegister }) => {
 
     try {
       await login(formData);
-      // Login successful - auth state change will handle redirection
     } catch (error: any) {
       console.error('Login error:', error);
       
-      // Handle specific Supabase errors
       if (error.message?.includes('Invalid login credentials')) {
         setErrors({ 
           general: 'Email ou mot de passe incorrect' 
         });
       } else if (error.message?.includes('Email not confirmed')) {
         setErrors({ 
-          general: 'Veuillez confirmer votre email avant de vous connecter. Un nouveau lien de confirmation vous a été envoyé.' 
+          general: 'Veuillez confirmer votre email avant de vous connecter.' 
         });
-        // Renvoyer un nouveau lien de confirmation
         try {
           await supabase.auth.resend({
             type: 'signup',
             email: formData.email
           });
         } catch (resendError) {
-          console.error('Erreur lors du renvoi du lien de confirmation:', resendError);
+          console.error('Erreur lors du renvoi du lien:', resendError);
         }
       } else if (error.message?.includes('rate limit')) {
         setErrors({ 
@@ -74,7 +71,6 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToRegister }) => {
       [name]: value
     }));
     
-    // Clear error for this field when user starts typing
     if (errors[name]) {
       setErrors(prev => ({ ...prev, [name]: '' }));
     }
@@ -120,11 +116,6 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToRegister }) => {
                   </a>
                 </p>
               )}
-              {errors.general?.includes('confirmer votre email') && (
-                <p className="text-xs text-blue-600 mt-1">
-                  Un nouveau lien de confirmation a été envoyé à votre adresse email.
-                </p>
-              )}
             </div>
           )}
 
@@ -164,15 +155,11 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToRegister }) => {
             </button>
           </div>
 
+          {/* Mot de passe oublié - DÉSACTIVÉ TEMPORAIREMENT */}
           <div className="text-right">
-            <button
-              type="button"
-              onClick={() => setIsForgotPasswordOpen(true)}
-              className="text-sm text-primary-600 hover:text-primary-700 disabled:opacity-50"
-              disabled={isLoadingTotal}
-            >
-              Mot de passe oublié ?
-            </button>
+            <span className="text-sm text-gray-400 cursor-not-allowed opacity-50">
+              Mot de passe oublié ? (indisponible)
+            </span>
           </div>
 
           <Button
@@ -200,11 +187,6 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToRegister }) => {
           </p>
         </div>
       </Card>
-
-      <ForgotPasswordModal
-        isOpen={isForgotPasswordOpen}
-        onClose={() => setIsForgotPasswordOpen(false)}
-      />
     </div>
   );
 };
