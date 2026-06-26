@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Mail, Lock, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { supabase } from '../../lib/supabase';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Card } from '../ui/Card';
@@ -41,8 +42,17 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToRegister }) => {
         });
       } else if (error.message?.includes('Email not confirmed')) {
         setErrors({ 
-          general: 'Veuillez confirmer votre email avant de vous connecter' 
+          general: 'Veuillez confirmer votre email avant de vous connecter. Un nouveau lien de confirmation vous a été envoyé.' 
         });
+        // Renvoyer un nouveau lien de confirmation
+        try {
+          await supabase.auth.resend({
+            type: 'signup',
+            email: formData.email
+          });
+        } catch (resendError) {
+          console.error('Erreur lors du renvoi du lien de confirmation:', resendError);
+        }
       } else if (error.message?.includes('rate limit')) {
         setErrors({ 
           general: 'Trop de tentatives. Veuillez réessayer plus tard.' 
@@ -108,6 +118,11 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToRegister }) => {
                   >
                     Créer un compte ?
                   </a>
+                </p>
+              )}
+              {errors.general?.includes('confirmer votre email') && (
+                <p className="text-xs text-blue-600 mt-1">
+                  Un nouveau lien de confirmation a été envoyé à votre adresse email.
                 </p>
               )}
             </div>
@@ -186,7 +201,6 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToRegister }) => {
         </div>
       </Card>
 
-      {/* Modal Mot de passe oublié */}
       <ForgotPasswordModal
         isOpen={isForgotPasswordOpen}
         onClose={() => setIsForgotPasswordOpen(false)}
